@@ -1,8 +1,6 @@
-# MLOps Assignment 1 - Deep Learning Experiments
+# MLOps Assignment 1 -
 
-**Author:** Sirin Changulani  
-**Institution:** B.Tech AI & Data Science, IIT Jodhpur  
-**Date:** January 24, 2026
+
 
 ## Overview
 
