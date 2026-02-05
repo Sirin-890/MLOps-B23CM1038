@@ -1,0 +1,168 @@
+# DATA CONTRACT: Smart Thermostat Fleet Telemetry
+#
+# SUMMARY
+#
+# This data comes from the smart thermostat device fleet
+# and is used by the Home Analytics Platform.
+#
+# What went wrong:
+# - Some failed sensors reported 9999°C instead of a real temperature
+# - Invalid battery values appeared outside the 0.0–1.0 range
+# - These values broke averages, statistics, and user dashboards
+#
+# What we agreed to do:
+# - Only allow temperatures between -30°C and +60°C
+# - Only allow battery values between 0.0 and 1.0
+# - Reject any reading outside these ranges
+# - Trigger device health alerts when data is rejected
+#
+# Approved on: 2024-01-20
+# Approved by: IoT Platform Lead and Analytics Team Lead
+
+
+dataContractSpecification: 0.9.3
+id: urn:datacontract:iot:thermostat-telemetry
+version: 1.0.0
+
+#───────────────────────────────────────────────────────────────────────────
+# 1. OWNERSHIP & GOVERNANCE
+#───────────────────────────────────────────────────────────────────────────
+
+info:
+  title: "Smart Thermostat Fleet Telemetry"
+  description: |
+    Temperature and battery readings from deployed smart thermostats.
+    Collected every minute from 10,000 active devices.
+    Primary use: Home temperature analytics, energy optimization, device health monitoring.
+  owner: "IoT Platform Team"
+  contact:
+    name: "IoT Data Steward"
+    email: "iot-platform@smarthome.com"
+    slack: "#iot-data-platform"
+  classification: internal
+  tags: [iot, telemetry, temperature, smart-home, sensor-data]
+
+#───────────────────────────────────────────────────────────────────────────
+# 2. SCHEMA DEFINITION (Logical Contract)
+#───────────────────────────────────────────────────────────────────────────
+
+schema:
+  type: object
+  properties:
+    device_id:
+      type: string
+      description: |
+        Unique identifier for the thermostat device (e.g., 'xyz').
+        Used for device tracking and health monitoring.
+      pii: false
+      # physical_mapping: dev_id
+
+    temperature_celsius:
+      type: number
+      minimum: -30
+      maximum: 60
+      description: |
+        Current temperature reading in degrees Celsius.
+        Valid range: -30°C to +60°C inclusive.
+        
+        Sensor failure mode: Devices default to 9999°C when calibration fails.
+        Out-of-range values indicate sensor malfunction and are rejected.
+      pii: false
+      # physical_mapping: temp_c
+
+    battery_level:
+      type: number
+      minimum: 0.0
+      maximum: 1.0
+      description: |
+        Battery charge level as decimal percentage.
+        Valid range: 0.0 to 1.0 inclusive.
+        
+        0.0 = completely depleted (valid, triggers low battery alert)
+        1.0 = fully charged (valid)
+        
+        Values outside this range (e.g., 1.5, -0.2) indicate sensor malfunction.
+      pii: false
+      # physical_mapping: batt_lvl
+
+  required:
+    - device_id
+    - temperature_celsius
+    - battery_level
+
+#───────────────────────────────────────────────────────────────────────────
+# 3. SERVICE LEVEL AGREEMENTS (SLAs)
+#───────────────────────────────────────────────────────────────────────────
+
+sla:
+  freshness:
+    threshold: "2 minutes"
+    description: "Data updated every 60 seconds; 1-minute transmission tolerance"
+  availability:
+    percentage: "99.5%"
+    description: "High availability for real-time home climate monitoring"
+  retention:
+    period: "1 year"
+    description: "Historical data for seasonal energy analysis"
+
+#───────────────────────────────────────────────────────────────────────────
+# 4. DATA QUALITY RULES
+#───────────────────────────────────────────────────────────────────────────
+
+quality:
+  # Rule 1: Temperature within valid sensor range (CRITICAL CIRCUIT BREAKER)
+  - name: temperature_range_valid
+    type: validity
+    expression: "temperature_celsius >= -30 AND temperature_celsius <= 60"
+    threshold: "100%"
+    enforcement: hard
+    description: |
+      Temperature must be between -30°C and +60°C inclusive.
+      
+      This prevents failed sensors (which default to 9999°C) from skewing
+      the "Average Home Temperature" calculation.
+      
+      Physical sensor capabilities:
+      - Lower bound: -30°C (extreme cold environments)
+      - Upper bound: +60°C (extreme heat, direct sunlight exposure)
+      
+      Readings outside this range indicate sensor failure and trigger
+      device maintenance alerts.
+
+  # Rule 2: Battery level within valid percentage range (CRITICAL CIRCUIT BREAKER)
+  - name: battery_level_range_valid
+    type: validity
+    expression: "battery_level >= 0.0 AND battery_level <= 1.0"
+    threshold: "100%"
+    enforcement: hard
+    description: |
+      Battery level must be between 0.0 and 1.0 inclusive.
+      
+      Valid boundary conditions:
+      - 0.0 is VALID (completely dead battery - triggers replacement alert)
+      - 1.0 is VALID (fully charged battery)
+      
+      Invalid examples indicating malfunction:
+      - 1.5 (impossible charge state)
+      - -0.2 (negative charge - sensor error)
+      
+      Out-of-range values indicate battery sensor malfunction and are rejected.
+
+  # Rule 3: Device ID completeness
+  - name: device_id_completeness
+    type: completeness
+    column: device_id
+    threshold: "100%"
+    enforcement: hard
+    description: "Device ID is mandatory for tracking and health monitoring"
+
+  # Rule 4: Extreme temperature alert (soft warning for investigation)
+  - name: extreme_temperature_warning
+    type: validity
+    expression: "temperature_celsius >= -10 AND temperature_celsius <= 40"
+    threshold: "95%"
+    enforcement: soft
+    description: |
+      Temperatures outside typical home range (-10°C to 40°C) are valid
+      but unusual. This rule generates warnings for investigation without
+      blocking data flow. Examples: unheated garages, outdoor installations.

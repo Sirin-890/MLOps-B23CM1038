@@ -1,0 +1,194 @@
+# DATA CONTRACT: CityMove Ride-Share Data
+#
+# SUMMARY
+#
+# This data is produced by the CityMove Database Engineering team
+# and used by the Machine Learning team for dynamic pricing.
+#
+# What was agreed:
+# - Data is refreshed every 30 minutes to match model retraining needs
+# - Database column names are converted to clear, logical names
+# - Data quality rules are enforced strictly to avoid model failures
+# - Passenger ID is marked as sensitive for privacy and compliance
+#
+# Acceptable trade-offs:
+# - Distance may be missing during database maintenance
+# - Fare and rider rating must always be present and valid
+#
+# Why this contract exists:
+# A past schema change caused a 4-hour outage and $50,000 loss.
+# This contract ensures stability even if the database changes.
+#
+# Approved on: 2024-01-15
+# Approved by: Data Engineering Lead and ML Team Lead
+
+
+dataContractSpecification: 0.9.3
+id: urn:datacontract:citymove:ride-share-pricing
+version: 1.0.0
+
+#───────────────────────────────────────────────────────────────────────────
+# 1. OWNERSHIP & GOVERNANCE
+#───────────────────────────────────────────────────────────────────────────
+
+info:
+  title: "CityMove Ride-Share Data"
+  description: |
+    Completed ride records containing trip details, pricing, and ratings.
+    Primary use: Dynamic pricing algorithm training and real-time fare prediction.
+    This contract serves as a stable interface between operational database
+    and ML systems to prevent breaking changes.
+  owner: "Database Engineering Team"
+  contact:
+    name: "Platform Data Steward"
+    email: "data-platform@citymove.com"
+    slack: "#data-platform-support"
+  classification: internal  # Contains PII (passenger ID)
+  tags: [transportation, rides, pricing, machine-learning, pii]
+
+#───────────────────────────────────────────────────────────────────────────
+# 2. SCHEMA DEFINITION (Logical Contract)
+#───────────────────────────────────────────────────────────────────────────
+
+schema:
+  type: object
+  properties:
+    ride_id:
+      type: string
+      description: |
+        Unique identifier for each completed ride.
+        Format: alphanumeric with hyphens (e.g., 'a1-b2-c3').
+      pii: false
+      # physical_mapping: r_id
+
+    pickup_timestamp:
+      type: string
+      format: date-time
+      description: |
+        UTC timestamp when the ride started (passenger pickup time).
+        Format: YYYY-MM-DD HH:MM:SS
+      pii: false
+      # physical_mapping: ts_start
+
+    passenger_id:
+      type: integer
+      description: |
+        Identifier linking to passenger account. CONTAINS PII.
+        Access restricted to authorized systems only.
+        Do not log, cache, or display in non-secure dashboards.
+      pii: true  # CRITICAL: Personally Identifiable Information
+      # physical_mapping: pax_id
+
+    driver_rating:
+      type: number
+      minimum: 1.0
+      maximum: 5.0
+      description: |
+        Driver's rating at time of ride completion.
+        Scale: 1.0 (lowest) to 5.0 (highest), inclusive.
+      pii: false
+      # physical_mapping: d_rating
+
+    fare_amount:
+      type: number
+      minimum: 0
+      description: |
+        Total fare charged to passenger in USD.
+        Must be non-negative. Zero fares allowed for promotional rides.
+      pii: false
+      # physical_mapping: fare_final (previously cost_total)
+
+    distance_meters:
+      type: integer
+      description: |
+        Total distance traveled during the ride in meters.
+        Critical for pricing algorithm distance-based features.
+      pii: false
+      # physical_mapping: dist_m
+
+  required:
+    - ride_id
+    - pickup_timestamp
+    - passenger_id
+    - driver_rating
+    - fare_amount
+    - distance_meters
+
+#───────────────────────────────────────────────────────────────────────────
+# 3. SERVICE LEVEL AGREEMENTS (SLAs)
+#───────────────────────────────────────────────────────────────────────────
+
+sla:
+  freshness:
+    threshold: "30 minutes"
+    description: |
+      Data must be available within 30 minutes of ride completion.
+      Required for hourly ML model retraining cycles.
+  availability:
+    percentage: "99.9%"
+    description: "High availability required for real-time pricing"
+  retention:
+    period: "3 years"
+    description: "Historical data retained for model backtesting"
+
+#───────────────────────────────────────────────────────────────────────────
+# 4. DATA QUALITY RULES
+#───────────────────────────────────────────────────────────────────────────
+
+quality:
+  # Rule 1: Ride ID uniqueness
+  - name: ride_id_unique
+    type: uniqueness
+    column: ride_id
+    threshold: "100%"
+    enforcement: hard
+    description: "Each ride must have a unique identifier"
+
+  # Rule 2: Fare must be non-negative (CRITICAL CIRCUIT BREAKER)
+  - name: fare_non_negative
+    type: validity
+    expression: "fare_amount >= 0"
+    threshold: "100%"
+    enforcement: hard  # HARD CIRCUIT BREAKER - blocks pipeline on violation
+    description: |
+      Fare amount must never be negative.
+      This prevents corrupted data from breaking the ML pricing model.
+      Zero fares are allowed for promotional/free rides.
+
+  # Rule 3: Driver rating within valid range (CRITICAL CIRCUIT BREAKER)
+  - name: driver_rating_range
+    type: validity
+    expression: "driver_rating >= 1.0 AND driver_rating <= 5.0"
+    threshold: "100%"
+    enforcement: hard  # HARD CIRCUIT BREAKER - blocks pipeline on violation
+    description: |
+      Driver rating must be between 1.0 and 5.0 inclusive.
+      Out-of-range values indicate data corruption or system error.
+
+  # Rule 4: Distance not null (CRITICAL CIRCUIT BREAKER)
+  - name: distance_completeness
+    type: completeness
+    column: distance_meters
+    threshold: "100%"
+    enforcement: hard  # HARD CIRCUIT BREAKER - blocks pipeline on violation
+    description: |
+      Distance field is mandatory for pricing algorithm.
+      NULL values will cause model prediction failures.
+
+  # Rule 5: Pickup timestamp not in future
+  - name: pickup_timestamp_not_future
+    type: validity
+    expression: "pickup_timestamp <= CURRENT_TIMESTAMP"
+    threshold: "100%"
+    enforcement: hard
+    description: "Pickup time cannot be in the future"
+
+  # Rule 6: Fare reasonableness check (soft warning)
+  - name: fare_reasonableness
+    type: validity
+    expression: "fare_amount <= 1000"
+    threshold: "99%"
+    enforcement: soft
+    description: |
+      Fares above $1000 are unusual but valid (e.g., long-distance trips).
+      This rule generates warnings for investigation but does not block data.

@@ -1,0 +1,218 @@
+# DATA CONTRACT: Bank Transaction Log (Fraud Detection)
+#
+# SUMMARY
+#
+# This data is produced by the Core Banking System
+# and consumed by the real-time Fraud Detection Engine.
+#
+# What went wrong before:
+# - A system upgrade changed account IDs from 10 characters to 8
+# - The fraud model could not find these accounts
+# - Fraudulent transactions were missed
+# - This caused financial and reputational damage
+#
+# Root cause:
+# Account ID format was not being validated.
+#
+# What we decided:
+# - Account IDs must be exactly 10 characters
+# - Only uppercase letters (A–Z) and digits (0–9) are allowed
+# - Any invalid account ID stops the entire pipeline
+# - This prevents gaps in fraud detection
+#
+# Compliance:
+# This contract is regulated financial data.
+# Rules are enforced strictly to meet fraud and compliance needs.
+#
+# Approved on: 2024-01-25
+# Approved by: Banking Platform Lead and Fraud Detection Lead
+
+dataContractSpecification: 0.9.3
+id: urn:datacontract:fintech:transaction-log
+version: 1.0.0
+
+#───────────────────────────────────────────────────────────────────────────
+# 1. OWNERSHIP & GOVERNANCE
+#───────────────────────────────────────────────────────────────────────────
+
+info:
+  title: "Bank Transaction Log (Fraud Detection Feed)"
+  description: |
+    Real-time transaction events for fraud detection and monitoring.
+    Includes source/destination account IDs and transaction timestamps.
+    
+    CRITICAL SYSTEM: Powers real-time fraud detection. Any data quality
+    issues can result in missed fraudulent transactions.
+    
+    Subject to financial regulatory compliance requirements.
+  owner: "Core Banking Platform Team"
+  contact:
+    name: "Banking Data Steward"
+    email: "banking-platform@bank.com"
+    slack: "#banking-data-platform"
+  classification: confidential  # Financial transaction data
+  tags: [fintech, banking, fraud-detection, transactions, compliance, pci]
+
+#───────────────────────────────────────────────────────────────────────────
+# 2. SCHEMA DEFINITION (Logical Contract)
+#───────────────────────────────────────────────────────────────────────────
+
+schema:
+  type: object
+  properties:
+    account_source_id:
+      type: string
+      pattern: "^[A-Z0-9]{10}$"
+      description: |
+        Source account identifier (sender).
+        
+        STRICT FORMAT REQUIREMENT:
+        - Exactly 10 characters (not 8, not 9, not 11)
+        - Uppercase letters (A-Z) and digits (0-9) ONLY
+        - No lowercase, no special characters, no spaces
+        
+        Valid examples:
+          ✓ ABCD123456
+          ✓ 1234567890
+          ✓ A1B2C3D4E5
+        
+        Invalid examples:
+          ✗ abcd123456  (lowercase letters)
+          ✗ ABCD1234    (only 8 characters - too short)
+          ✗ ABC_123456  (contains underscore)
+          ✗ ABC 123456  (contains space)
+          ✗ ABCD12345678 (12 characters - too long)
+        
+        Regex pattern: ^[A-Z0-9]{10}$
+      pii: true  # Account IDs are considered sensitive financial data
+      # physical_mapping: acct_src
+
+    account_destination_id:
+      type: string
+      pattern: "^[A-Z0-9]{10}$"
+      description: |
+        Destination account identifier (recipient).
+        Same format requirements as account_source_id.
+        Must be exactly 10 uppercase alphanumeric characters.
+      pii: true  # Account IDs are considered sensitive financial data
+      # physical_mapping: acct_dest
+
+    transaction_timestamp:
+      type: string
+      format: date-time
+      description: |
+        UTC timestamp when the transaction was initiated.
+        Critical for fraud detection temporal pattern analysis.
+      pii: false
+      # physical_mapping: tx_ts
+
+  required:
+    - account_source_id
+    - account_destination_id
+    - transaction_timestamp
+
+#───────────────────────────────────────────────────────────────────────────
+# 3. SERVICE LEVEL AGREEMENTS (SLAs)
+#───────────────────────────────────────────────────────────────────────────
+
+sla:
+  freshness:
+    threshold: "500 milliseconds"
+    description: "Real-time fraud detection requires sub-second latency"
+  availability:
+    percentage: "99.99%"
+    description: "Mission-critical availability for fraud prevention"
+  retention:
+    period: "7 years"
+    description: "Financial regulatory compliance retention period"
+
+#───────────────────────────────────────────────────────────────────────────
+# 4. DATA QUALITY RULES
+#───────────────────────────────────────────────────────────────────────────
+
+quality:
+  # Rule 1: Source account ID format validation (HARD CIRCUIT BREAKER)
+  - name: account_source_id_format
+    type: validity
+    expression: "REGEXP_LIKE(account_source_id, '^[A-Z0-9]{10}$')"
+    threshold: "100%"
+    enforcement: hard  #  HARD CIRCUIT BREAKER - BLOCKS PIPELINE ON VIOLATION
+    description: |
+      CRITICAL CIRCUIT BREAKER: Account source ID format validation.
+      
+      This rule enforces EXACTLY 10 uppercase alphanumeric characters.
+      
+      WHY HARD ENFORCEMENT:
+      During the legacy system upgrade, 8-character IDs caused the fraud
+      detection model to silently fail account lookups, resulting in missed
+      fraudulent transactions. Any malformed ID represents a gap in fraud
+      detection coverage.
+      
+      ENFORCEMENT: Hard circuit breaker - any violation BLOCKS the entire
+      pipeline. We cannot risk fraud detection failures.
+      
+      Format specification:
+      - Pattern: ^[A-Z0-9]{10}$
+      - Length: Exactly 10 characters (no more, no less)
+      - Characters: Uppercase A-Z and digits 0-9 only
+      - No lowercase, spaces, special characters, or Unicode
+
+  # Rule 2: Destination account ID format validation (HARD CIRCUIT BREAKER)
+  - name: account_destination_id_format
+    type: validity
+    expression: "REGEXP_LIKE(account_destination_id, '^[A-Z0-9]{10}$')"
+    threshold: "100%"
+    enforcement: hard  #  HARD CIRCUIT BREAKER - BLOCKS PIPELINE ON VIOLATION
+    description: |
+      CRITICAL CIRCUIT BREAKER: Account destination ID format validation.
+      Same requirements as source account ID.
+      Hard enforcement required for fraud detection integrity.
+
+  # Rule 3: Source and destination cannot be identical (fraud pattern)
+  - name: no_self_transfer
+    type: validity
+    expression: "account_source_id != account_destination_id"
+    threshold: "100%"
+    enforcement: hard
+    description: |
+      Transfers to the same account are not allowed.
+      Self-transfers are a known fraud pattern for money laundering.
+
+  # Rule 4: Transaction timestamp not in future
+  - name: transaction_timestamp_not_future
+    type: validity
+    expression: "transaction_timestamp <= CURRENT_TIMESTAMP"
+    threshold: "100%"
+    enforcement: hard
+    description: |
+      Transaction timestamp cannot be in the future.
+      Future timestamps indicate system clock issues or data manipulation.
+
+  # Rule 5: Transaction uniqueness (prevent duplicate processing)
+  - name: transaction_uniqueness
+    type: uniqueness
+    column: transaction_timestamp
+    threshold: "99.9%"
+    enforcement: soft
+    description: |
+      Detect potential duplicate transactions (same timestamp).
+      Soft enforcement as legitimate simultaneous transactions are possible.
+
+# ENFORCEMENT NOTES
+#
+# HARD CIRCUIT BREAKER POLICY:
+#
+# The account ID format rules are enforced strictly.
+#
+# If any record violates these rules:
+# - The entire pipeline stops immediately
+# - There are no warnings or partial processing
+# - Processing resumes only after the issue is fixed
+# - The on-call team is alerted right away
+#
+# Why this is strict:
+# In the past, incorrect account IDs caused the fraud system to miss
+# fraudulent transactions, leading to financial and reputational loss.
+#
+# This is an intentional decision:
+# It is safer to stop the system than to allow gaps in fraud detection.
