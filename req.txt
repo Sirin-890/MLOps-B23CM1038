@@ -1,4 +1,4 @@
 torch
 torchvision
 numpy
-sklearn
+sckit-learn
