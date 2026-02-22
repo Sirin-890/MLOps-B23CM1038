@@ -11,12 +11,15 @@ history & biography, mystery/thriller/crime, poetry, romance, and young adult.
 ```bash
 docker build -t mlops_assingment3 .
 ```
-
+```bash
 docker run --gpus all \
     -v $(pwd)/results:/workspace/results \
     -v $(pwd)/logs:/workspace/logs \
     mlops_assingment3 \
     python train.py
+```
+
+
 
 ```bash
 docker run --gpus all \
