@@ -77,7 +77,7 @@ Retrained from scratch using the best config for **25 epochs**.
 
 | Metric | Baseline (100 ep) | Tuned (25 ep) | Improvement |
 |---|---|---|---|
-| Final Loss | 0.0917 | 0.1946 | — |
+| Final Loss | 0.0917 | 0.1538  | 0.014 |
 | **BLEU Score** | **52.47** | **69.39** | **+16.92 pts** |
 | Training Time | ~85 min | ~15 min | ~5.7× faster |
 | Epochs needed | 100 | 25 | 75% fewer |
