@@ -2,9 +2,9 @@
 
 **Task:** Sequence-to-sequence translation using a Transformer model, with hyperparameter tuning via Ray Tune + Optuna.
 
-markdown## Model on Hugging Face
+## Model on Hugging Face
 
-[![Hugging Face Model](https://huggingface.co/bappaiitj/Assingment-4_mlops)
+[Hugging Face Model](https://huggingface.co/bappaiitj/Assingment-4_mlops)
 
 
 
