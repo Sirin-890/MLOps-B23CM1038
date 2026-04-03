@@ -1,7 +1,7 @@
 # Assignment 5 - ViT LoRA & Adversarial Robustness
 Hugging face link :https://huggingface.co/bappaiitj/vit_lora
 wandb links1:https://wandb.ai/b23cm1038-prom-iit-rajasthan/Assignment-5-vit_lora?nw=nwuserb23cm1038
-wandb link 2:https://wandb.ai/b23cm1038-prom-iit-rajasthan/Ass_5_Adversarial/runs/1vq2a9rf?nw=nwuserb23cm1038
+wandb link 2:https://wandb.ai/b23cm1038-prom-iit-rajasthan/Ass_5_Adversarial?nw=nwuserb23cm1038
 
 ## Installation
 Run the following commands in the root of this project:
